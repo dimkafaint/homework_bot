@@ -105,7 +105,7 @@ def main():
         except Exception as error:
             logger.error(f'Сбой в работе программы: {error}')
             time.sleep(RETRY_TIME)
-    
+
 
 if __name__ == '__main__':
     main()
