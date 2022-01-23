@@ -1,9 +1,10 @@
-import time
-import logging
-import telegram
-import requests
-import os
+from lib2to3.pgen2 import token
+import logging, os, requests, time
+
 from dotenv import load_dotenv
+from http.client import HTTPException
+from json import JSONDecodeError
+import telegram
 
 
 load_dotenv()
@@ -16,35 +17,43 @@ RETRY_TIME = 600
 ENDPOINT = 'https://practicum.yandex.ru/api/user_api/homework_statuses/'
 HEADERS = {'Authorization': f'OAuth {PRACTICUM_TOKEN}'}
 
-HOMEWORK_STATUSES = {
+HOMEWORK_VERDICTS = {
     'approved': 'Работа проверена: ревьюеру всё понравилось. Ура!',
     'reviewing': 'Работа взята на проверку ревьюером.',
     'rejected': 'Работа проверена: у ревьюера есть замечания.'
 }
-logging.basicConfig(
-    format='%(asctime)s - %(levelname)s - %(name)s - %(message)s',
-    level=logging.INFO)
+SERVER_ERROR = "Неверный статус сервера. {0}, Headers{1}, Params{2}"
 logger = logging.getLogger(__name__)
+logger.addHandler(logging.StreamHandler())
 
 
 def send_message(bot, message):
     """Отправка результатов пользователю."""
     try:
-        logger.info('Сообщение отправлено!')
         bot.send_message(TELEGRAM_CHAT_ID, message)
     except telegram.TelegramError as e:
-        logger.error(f'Сообщение не отправлено: {e}.')
+        logger.exception(f'Сообщение не отправлено: {e}.')
+    else:
+        logger.info(f'Сообщение {message} отправлено!')
 
 
 def get_api_answer(current_timestamp):
     """Запрос API Практикума."""
-    timestamp = current_timestamp or int(time.time())
-    params = {'from_date': timestamp}
-    response = requests.get(ENDPOINT, headers=HEADERS, params=params)
+    params = {'from_date': current_timestamp}
+    try:
+        response = requests.get(ENDPOINT,
+                                headers=HEADERS,
+                                params=params,
+                                timeout=10)
+    except requests.Timeout as e:
+        logger.exception(f'Нет ответа от сервера. {e}')
     if response.status_code != 200:
-        logger.error("API Яндекс.Практикума не отвечает!")
-        raise AttributeError("API Яндекс.Практикума не отвечает!")
-    return response.json()
+        raise HTTPException(SERVER_ERROR.format(
+            response.status_code, HEADERS, params))
+    try:
+        return response.json()
+    except JSONDecodeError:
+        logger.exception('Неподдерживаемый формат.')
 
 
 def check_response(response):
@@ -52,10 +61,8 @@ def check_response(response):
     try:
         homeworks = response['homeworks']
     except KeyError:
-        logger.error('Ключ homeworks не найден!')
         raise KeyError('Ключ homeworks не найден!')
     if not isinstance(homeworks, list):
-        logger.error("Некорректный формат списка работ!")
         raise TypeError("Неправильно указан тип для homeworks")
     if len(homeworks) == 0:
         logger.info("Список работ пуст.")
@@ -64,30 +71,25 @@ def check_response(response):
 
 def parse_status(homework):
     """Извлечение статусов."""
-    try:
-        homework_name = homework['homework_name']
-    except KeyError:
-        logger.error('Ключ homework_name не найден!')
-        raise KeyError('Ключ homework_name не найден!')
-    try:
-        homework_status = homework['status']
-    except KeyError:
-        logger.error('Ключ status не найден!')
-        raise KeyError('Ключ status не найден!')
-    if homework_status in HOMEWORK_STATUSES:
-        verdict = HOMEWORK_STATUSES[homework_status]
+    homework_name = homework['homework_name']
+    status = homework['status']
+    verdict = HOMEWORK_VERDICTS[status]
+    if status in HOMEWORK_VERDICTS:
         return f'Изменился статус проверки работы "{homework_name}"-{verdict}'
-    raise AttributeError(f'Статус {homework_status} не найден.')
+    raise KeyError(f'Статус {status} не найден.')
 
 
 def check_tokens():
     """Проверка доступности переменных окружения."""
-    tokens = [PRACTICUM_TOKEN, TELEGRAM_TOKEN, TELEGRAM_CHAT_ID]
+    tokens = {
+        'PRACTICUM_TOKEN': PRACTICUM_TOKEN,
+        'TELEGRAM_TOKEN': TELEGRAM_TOKEN,
+        'TELEGRAM_CHAT_ID': TELEGRAM_CHAT_ID
+        }
     for token in tokens:
-        if token is None:
-            logger.critical('Отстутствует токен!')
-            return False
-        return True
+        if tokens[token] == '':
+            logger.error(f'Нет токена {token}.')
+            tokens_status = False
 
 
 def main():
@@ -108,4 +110,8 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    logging.basicConfig(
+    filename=__file__ + '.log',
+    format='%(asctime)s - %(levelname)s - %(name)s - %(message)s',
+    level=logging.INFO)
+    check_tokens()
