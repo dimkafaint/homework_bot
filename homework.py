@@ -1,4 +1,3 @@
-from lib2to3.pgen2 import token
 import logging, os, requests, time
 
 from dotenv import load_dotenv
@@ -86,27 +85,32 @@ def check_tokens():
         'TELEGRAM_TOKEN': TELEGRAM_TOKEN,
         'TELEGRAM_CHAT_ID': TELEGRAM_CHAT_ID
         }
+    tokens_status = True
     for token in tokens:
         if tokens[token] == '':
             logger.error(f'Нет токена {token}.')
             tokens_status = False
+    return tokens_status
 
 
 def main():
     """Основная логика работы бота."""
-    check_tokens()
+    if not check_tokens():
+        logger.error("Запуск программы невозможен.")
+        quit()
     bot = telegram.Bot(token=TELEGRAM_TOKEN)
     current_timestamp = int(time.time())
     while True:
         try:
-            response = check_response(get_api_answer(current_timestamp))
-            for homework in response:
-                send_message(bot, parse_status(homework))
-            current_timestamp = int(time.time())
-            time.sleep(RETRY_TIME)
+            response = get_api_answer(current_timestamp)
+            homework = check_response(response)
+            send_message(bot, parse_status(homework))
+            current_timestamp = response.get(
+                'date_updated', current_timestamp)
         except Exception as error:
             logger.error(f'Сбой в работе программы: {error}')
-            time.sleep(RETRY_TIME)
+            send_message(bot, f'Ошибка {error}')
+        time.sleep(RETRY_TIME)
 
 
 if __name__ == '__main__':
@@ -114,4 +118,4 @@ if __name__ == '__main__':
     filename=__file__ + '.log',
     format='%(asctime)s - %(levelname)s - %(name)s - %(message)s',
     level=logging.INFO)
-    check_tokens()
+    main()
