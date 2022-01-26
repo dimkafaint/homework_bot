@@ -1,4 +1,7 @@
-import logging, os, requests, time
+import logging
+import os
+import requests
+import time
 
 from dotenv import load_dotenv
 from http.client import HTTPException
@@ -63,13 +66,13 @@ def check_response(response):
         raise KeyError('Ключ homeworks не найден!')
     if not isinstance(homeworks, list):
         raise TypeError("Неправильно указан тип для homeworks")
-    if len(homeworks) == 0:
+    if not homeworks:
         logger.info("Список работ пуст.")
     return homeworks
 
 
 def parse_status(homework):
-    """Извлечение статусов."""
+    """Извлечение статуса."""
     homework_name = homework['homework_name']
     status = homework['status']
     verdict = HOMEWORK_VERDICTS[status]
@@ -84,10 +87,10 @@ def check_tokens():
         'PRACTICUM_TOKEN': PRACTICUM_TOKEN,
         'TELEGRAM_TOKEN': TELEGRAM_TOKEN,
         'TELEGRAM_CHAT_ID': TELEGRAM_CHAT_ID
-        }
+    }
     tokens_status = True
     for token in tokens:
-        if tokens[token] == '':
+        if tokens[token] is None:
             logger.error(f'Нет токена {token}.')
             tokens_status = False
     return tokens_status
@@ -103,10 +106,13 @@ def main():
     while True:
         try:
             response = get_api_answer(current_timestamp)
-            homework = check_response(response)
-            send_message(bot, parse_status(homework))
-            current_timestamp = response.get(
-                'date_updated', current_timestamp)
+            homeworks = check_response(response)
+            if homeworks:
+                homework = parse_status(homeworks[0])
+                if homework is not None:
+                    send_message(bot, homework)
+                    current_timestamp = response.get(
+                        'current_date', current_timestamp)
         except Exception as error:
             logger.error(f'Сбой в работе программы: {error}')
             send_message(bot, f'Ошибка {error}')
@@ -115,7 +121,7 @@ def main():
 
 if __name__ == '__main__':
     logging.basicConfig(
-    filename=__file__ + '.log',
-    format='%(asctime)s - %(levelname)s - %(name)s - %(message)s',
-    level=logging.INFO)
+        filename=__file__ + '.log',
+        format='%(asctime)s - %(levelname)s - %(name)s - %(message)s',
+        level=logging.INFO)
     main()
